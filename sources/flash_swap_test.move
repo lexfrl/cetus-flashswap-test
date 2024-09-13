@@ -7,48 +7,66 @@ module flash_swap_test::flash_swap_module {
     use sui::coin;
     use sui::balance;
 
-    public entry fun switch_loan<CoinTypeA, CoinTypeB>(
-        config: &GlobalConfig,
-        pool:  &mut AMMPool<CoinTypeA, CoinTypeB>,
-        mut coin_a: Coin<CoinTypeA>,
-        mut coin_b: Coin<CoinTypeB>,
+    const SQRT_PRICE_LIMIT: u128 = 4295048016;
+
+    entry public fun swap<CoinTypeA, CoinTypeB>(
+        coin_a: Coin<CoinTypeA>,
+        amount: u64,
         a2b: bool,
         by_amount_in: bool,
-        amount: u64,
-        sqrt_price_limit: u128,
+        pool:  &mut AMMPool<CoinTypeA, CoinTypeB>,
+        config: &GlobalConfig,
         clock: &Clock,
         ctx: &mut TxContext
-) {
-    let (receive_a, receive_b, flash_receipt) = pool::flash_swap<CoinTypeA, CoinTypeB>(
-        config,
-        pool,
-        a2b,
-        by_amount_in,
-        amount,
-        sqrt_price_limit,
-        clock
-    );
-    let (in_amount, out_amount) = (
-        pool::swap_pay_amount(&flash_receipt),
-        if (a2b) balance::value(&receive_b) else balance::value(&receive_a)
-    );
-
-    // pay for flash swap
-    let (pay_coin_a, pay_coin_b) = if (a2b) {
-        (coin::into_balance(coin::split(&mut coin_a, in_amount, ctx)), balance::zero<CoinTypeB>())
-    } else {
-        (balance::zero<CoinTypeA>(), coin::into_balance(coin::split(&mut coin_b, in_amount, ctx)))
-    };
-
-    coin::join(&mut coin_b, coin::from_balance(receive_b, ctx));
-    coin::join(&mut coin_a, coin::from_balance(receive_a, ctx));
-
-    pool::repay_flash_swap<CoinTypeA, CoinTypeB>(
-        config,
-        pool,
-        pay_coin_a,
-        pay_coin_b,
-        flash_receipt
-    );
+    ) {
+        let (coin_a_out, coit_b_out) = do_swap(coin_a, coin::zero(ctx), amount, a2b, by_amount_in, SQRT_PRICE_LIMIT, pool, config, clock, ctx);
+        sui::transfer::public_transfer(coin_a_out, ctx.sender());
+        sui::transfer::public_transfer(coit_b_out, ctx.sender());
     }
+
+    public fun do_swap<CoinTypeA, CoinTypeB>(
+        mut coin_a: Coin<CoinTypeA>,
+        mut coin_b: Coin<CoinTypeB>,
+        amount: u64,
+        a2b: bool,
+        by_amount_in: bool,
+        sqrt_price_limit: u128,
+        pool:  &mut AMMPool<CoinTypeA, CoinTypeB>,
+        config: &GlobalConfig,
+        clock: &Clock,
+        ctx: &mut TxContext
+): (Coin<CoinTypeA>, Coin<CoinTypeB>) {
+        let (receive_a, receive_b, flash_receipt) = pool::flash_swap<CoinTypeA, CoinTypeB>(
+            config,
+            pool,
+            a2b,
+            by_amount_in,
+            amount,
+            sqrt_price_limit,
+            clock
+        );
+        let (in_amount, out_amount) = (
+            pool::swap_pay_amount(&flash_receipt),
+            if (a2b) balance::value(&receive_b) else balance::value(&receive_a)
+        );
+
+        // pay for flash swap
+        let (pay_coin_a, pay_coin_b) = if (a2b) {
+            (coin::into_balance(coin::split(&mut coin_a, in_amount, ctx)), balance::zero<CoinTypeB>())
+        } else {
+            (balance::zero<CoinTypeA>(), coin::into_balance(coin::split(&mut coin_b, in_amount, ctx)))
+        };
+
+        coin::join(&mut coin_a, coin::from_balance(receive_a, ctx));
+        coin::join(&mut coin_b, coin::from_balance(receive_b, ctx));
+        
+        pool::repay_flash_swap<CoinTypeA, CoinTypeB>(
+            config,
+            pool,
+            pay_coin_a,
+            pay_coin_b,
+            flash_receipt
+        );
+        (coin_a, coin_b)
+}
 }
