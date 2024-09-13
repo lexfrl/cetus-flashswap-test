@@ -7,7 +7,8 @@ module flash_swap_test::flash_swap_module {
     use sui::coin;
     use sui::balance;
 
-    const SQRT_PRICE_LIMIT: u128 = 4295048016;
+    const SQRT_PRICE_LIMIT_A2B: u128 = 4295048016;
+    const SQRT_PRICE_LIMIT_B2A: u128 = 79226673515401279992447579055;
 
     entry public fun swap<CoinTypeA, CoinTypeB>(
         coin_a: Coin<CoinTypeA>,
@@ -19,7 +20,8 @@ module flash_swap_test::flash_swap_module {
         clock: &Clock,
         ctx: &mut TxContext
     ) {
-        let (coin_a_out, coit_b_out) = do_swap(coin_a, coin::zero(ctx), amount, a2b, by_amount_in, SQRT_PRICE_LIMIT, pool, config, clock, ctx);
+        let sqrt_price_limit = if (a2b) { SQRT_PRICE_LIMIT_A2B } else {SQRT_PRICE_LIMIT_B2A};
+        let (coin_a_out, coit_b_out) = do_swap(coin_a, coin::zero(ctx), amount, a2b, by_amount_in, sqrt_price_limit, pool, config, clock, ctx);
         sui::transfer::public_transfer(coin_a_out, ctx.sender());
         sui::transfer::public_transfer(coit_b_out, ctx.sender());
     }
@@ -45,12 +47,8 @@ module flash_swap_test::flash_swap_module {
             sqrt_price_limit,
             clock
         );
-        let (in_amount, out_amount) = (
-            pool::swap_pay_amount(&flash_receipt),
-            if (a2b) balance::value(&receive_b) else balance::value(&receive_a)
-        );
+        let in_amount = pool::swap_pay_amount(&flash_receipt);
 
-        // pay for flash swap
         let (pay_coin_a, pay_coin_b) = if (a2b) {
             (coin::into_balance(coin::split(&mut coin_a, in_amount, ctx)), balance::zero<CoinTypeB>())
         } else {
@@ -68,5 +66,5 @@ module flash_swap_test::flash_swap_module {
             flash_receipt
         );
         (coin_a, coin_b)
-}
+    }
 }
